@@ -1,0 +1,37 @@
+[Unit]
+Description=IPv6 Rotating Proxy (SOCKS5/HTTP)
+Documentation=https://github.com/chuwang9964/ipv6-proxy-pool
+After=network-online.target ndppd.service
+Wants=network-online.target ndppd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ipv6-proxy
+
+# 根据实际路径和参数调整
+ExecStart=/opt/ipv6-proxy/ipv6-proxy \
+    -socks 0.0.0.0:53421 \
+    -prefix 240e:6b0:50::/112 \
+    -c 5000
+
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# 资源限制
+LimitNOFILE=1048576
+LimitNPROC=65535
+LimitCORE=0
+OOMScoreAdjust=-800
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ipv6-proxy
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=500
+
+[Install]
+WantedBy=multi-user.target
