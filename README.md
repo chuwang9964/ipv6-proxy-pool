@@ -82,3 +82,46 @@ sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:6b0:50::
 curl --socks5 127.0.0.1:53421 https://api6.ipify.org
 curl --proxy 127.0.0.1:53420 https://api6.ipify.org
 ```
+5. 添加系统服务
+```
+sudo tee /etc/systemd/system/ipv6-proxy.service <<'EOF'
+[Unit]
+Description=IPv6 Rotating Proxy (HTTP+SOCKS5)
+After=network-online.target ndppd.service
+Wants=network-online.target ndppd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ipv6-proxy
+
+# -c 10000: 并发上限 10000（HTTP 和 SOCKS5 共享）
+# 如果路由器之前炸过，建议先设 3000-5000 观察
+ExecStart=/opt/ipv6-proxy/ipv6-proxy \
+    -http 0.0.0.0:53420 \
+    -socks 0.0.0.0:53421 \
+    -prefix 240e:6b0:50::/64 \
+    -c 10000
+
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# === 资源限制：并发高的核心 ===
+LimitNOFILE=1048576
+LimitNPROC=65535
+OOMScoreAdjust=-800
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ipv6-proxy
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now ipv6-proxy
+sudo journalctl -u ipv6-proxy -f
+```
