@@ -32,15 +32,11 @@ enp2s0: <BROADCAST,MULTICAST,ALLMULTI,UP,LOWER_UP> mtu 1500 qdisc fq_codel state
     link/ether e4:54:e8:99:c6:47 brd ff:ff:ff:ff:ff:ff
     inet 192.168.1.250/24 brd 192.168.1.255 scope global enp1s0
        valid_lft forever preferred_lft forever
-    inet6 240e:6b0:50::fd5/128 scope global noprefixroute 
-       valid_lft forever preferred_lft forever
-    inet6 240e:6b0:50:0:e654:e8ff:fe99:c647/64 scope global mngtmpaddr noprefixroute 
-       valid_lft forever preferred_lft forever
-    inet6 fe80::e654:e8ff:fe99:c647/64 scope link 
+    inet6 240e:7b1:50::fd5/128 scope global noprefixroute 
        valid_lft forever preferred_lft forever
 
 # 添加本地路由，取前四位/64 ，对应的网口
-sudo ip route add local 240e:6b0:50::/64 dev enp2s0
+sudo ip route add local 240e:7b1:50::/64 dev enp2s0
 ```
 
 2. 安装ndppd 对应的网口enp2s0 对应的ipv6网段
@@ -54,7 +50,7 @@ proxy enp2s0 {
     timeout 500
     ttl 30000
 
-    rule 240e:6b0:50::/64 {
+    rule 240e:7b1:50::/64 {
         static
     }
 }
@@ -75,7 +71,7 @@ sudo mkdir -p /opt/ipv6-proxy
 cd /opt/ipv6-proxy
 sudo /usr/local/go/bin/go build -o ipv6-proxy main.go
 sudo chmod +x /opt/ipv6-proxy/ipv6-proxy
-sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:6b0:50::/64 -c 10000
+sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:7b1:50::/64 -c 10000
 ```
 4. 测试
 ```bash
@@ -83,7 +79,7 @@ curl --socks5 127.0.0.1:53421 https://api6.ipify.org
 curl --proxy 127.0.0.1:53420 https://api6.ipify.org
 ```
 5. 添加系统服务
-```
+```bash
 sudo tee /etc/systemd/system/ipv6-proxy.service <<'EOF'
 [Unit]
 Description=IPv6 Rotating Proxy (HTTP+SOCKS5)
@@ -100,7 +96,7 @@ WorkingDirectory=/opt/ipv6-proxy
 ExecStart=/opt/ipv6-proxy/ipv6-proxy \
     -http 0.0.0.0:53420 \
     -socks 0.0.0.0:53421 \
-    -prefix 240e:6b0:50::/64 \
+    -prefix 240e:7b1:50::/64 \
     -c 10000
 
 Restart=always
@@ -124,4 +120,9 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now ipv6-proxy
 sudo journalctl -u ipv6-proxy -f
+```
+6.一些踩坑
+```bash
+HTTP 代理的问题是每个 HTTP 请求新建一个 TCP，路由器 conntrack 几万条后爆炸,所以大量请求的时候优先使用socks5端口，也可以结合v2ray的vmess协议。
+    核心思路：v2ray/xray 做"协议前端"（加密 + 多路复用），go 代理只做"IPv6 出口"（随机源地址）。这样路由器 WAN 侧只看到少量 TLS 长连接，而不是海量 HTTP 短连接。
 ```
