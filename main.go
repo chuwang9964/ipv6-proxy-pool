@@ -17,7 +17,7 @@ import (
 var (
 	httpPort  = flag.String("http", "0.0.0.0:53420", "HTTP proxy listen address ")
 	socksPort = flag.String("socks", "0.0.0.0:53421", "SOCKS5 proxy listen address")
-	prefix    = flag.String("prefix", "240e:6b0:50:0:0:0:2::/112", "IPv6 prefix for outgoing IPs")
+	prefix    = flag.String("prefix", "240e:7b1:50::/64", "IPv6 prefix for outgoing IPs")
 	limit     = flag.Int("c", 5000, "max concurrent connections (semaphore limit)")
 )
 
