@@ -52,8 +52,9 @@ enp2s0: <BROADCAST,MULTICAST,ALLMULTI,UP,LOWER_UP> mtu 1500 qdisc fq_codel state
     inet6 fe80::e654:e8ff:fe99:c647/64 scope link 
        valid_lft forever preferred_lft forever
 
-# 添加本地路由，取前四位/64 ，对应的网口
-sudo ip route add local 240e:6b0:50::/64 dev enp2s0
+# 添加本地路由，认领你的 /112 子网到本地（每台服务器认领不同的 /112，避免冲突）
+# 例如服务器A用 240e:6b0:50::/112，服务器B用 240e:6b0:50:2::/112
+sudo ip route add local 240e:6b0:50::/112 dev enp2s0
 ```
 
 2. 安装ndppd 对应的网口enp2s0 对应的ipv6网段
@@ -67,7 +68,7 @@ proxy enp2s0 {
     timeout 500
     ttl 30000
 
-    rule 240e:6b0:50::/64 {
+    rule 240e:6b0:50::/112 {
         static
     }
 }
@@ -88,7 +89,7 @@ sudo mkdir -p /opt/ipv6-proxy
 cd /opt/ipv6-proxy
 sudo /usr/local/go/bin/go build -o ipv6-proxy main.go
 sudo chmod +x /opt/ipv6-proxy/ipv6-proxy
-sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:6b0:50::/64 -c 10000
+sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:6b0:50::/112 -c 10000
 ```
 4. 测试
 ```bash

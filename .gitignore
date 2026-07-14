@@ -1,0 +1,19 @@
+# 编译产物
+ipv6-proxy
+ipv6-proxy.exe
+*.exe
+
+# Go 相关
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE 和编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store

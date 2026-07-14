@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: main
 nodes_managed: true
-exported_at: "2026-07-14T07:08:36Z"
+exported_at: "2026-07-14T09:02:30Z"
 modules:
     "":
-        dir_name: IPv6 代理池入口程序
-        title: IPv6 代理池入口程序
+        dir_name: IPv6 多出口代理池（HTTP CONNECT _ SOCKS5）
+        title: IPv6 多出口代理池（HTTP CONNECT / SOCKS5）
         scope:
             - REDME.md
             - main.go
