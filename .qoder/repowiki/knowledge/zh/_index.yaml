@@ -1,0 +1,21 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-07-14T07:08:36Z"
+modules:
+    "":
+        dir_name: IPv6 代理池入口程序
+        title: IPv6 代理池入口程序
+        scope:
+            - REDME.md
+            - main.go
+            - scripts/
+            - LICENSE
+            - config.yaml.example
+            - go.mod
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

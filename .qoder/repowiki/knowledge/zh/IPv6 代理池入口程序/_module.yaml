@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: ""
+title: IPv6 代理池入口程序
+scope:
+    - REDME.md
+    - main.go
+    - scripts/
+    - LICENSE
+    - config.yaml.example
+    - go.mod
+source_files: []
+depends_on: []
+related_to: []
