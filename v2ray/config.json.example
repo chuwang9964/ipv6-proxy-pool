@@ -1,0 +1,63 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "vmess-in",
+      "port": 443,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "your-uuid-here",
+            "alterId": 0
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "/usr/local/etc/v2ray/cert.pem",
+              "keyFile": "/usr/local/etc/v2ray/key.pem"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "http-in",
+      "port": 8080,
+      "protocol": "http",
+      "settings": {
+        "accounts": [
+          {
+            "user": "admin",
+            "pass": "your-password-here"
+          }
+        ],
+        "allowTransparent": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "ipv6-proxy-out",
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 53421
+          }
+        ]
+      }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch"
+  }
+}

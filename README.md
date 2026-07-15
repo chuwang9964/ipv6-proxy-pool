@@ -96,3 +96,69 @@ sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:6b0:50::
 curl --socks5 127.0.0.1:53421 https://api6.ipify.org
 curl --proxy 127.0.0.1:53420 https://api6.ipify.org
 ```
+
+## 配合 v2ray 使用（推荐）
+
+通过 v2ray 作为代理出口，提供 VMess 和 HTTP 两种入站协议，出站流量经 ipv6-proxy 的 SOCKS5 端口随机 IPv6 出口。VMess 协议支持多路复用，可减少长连接数量，降低路由器 conntrack 压力。
+
+### 架构
+
+```
+客户端A → VMess(TLS) → v2ray:443 ─┐
+                                    ├→ SOCKS5 → ipv6-proxy → 随机 IPv6 → 目标
+客户端B → HTTP 代理  → v2ray:8080 ─┘
+```
+
+### 部署步骤
+
+1. 生成 TLS 证书
+```bash
+sudo bash scripts/gen_cert.sh
+```
+
+2. 生成 UUID
+```bash
+v2ray uuid
+```
+
+3. 配置 v2ray（参考 `v2ray/config.json.example`）
+```bash
+sudo mkdir -p /usr/local/etc/v2ray
+sudo cp v2ray/config.json.example /usr/local/etc/v2ray/config.json
+# 编辑 config.json，替换 UUID 和密码
+sudo nano /usr/local/etc/v2ray/config.json
+```
+
+配置说明：
+- 入站1（VMess）：监听 443 端口，TLS 加密，客户端通过 VMess 协议连接
+- 入站2（HTTP）：监听 8080 端口，HTTP 代理，支持用户名密码认证
+- 出站：SOCKS5 指向 `127.0.0.1:53421`（ipv6-proxy 的 SOCKS5 端口）
+
+4. 启动服务
+```bash
+# 先确保 ipv6-proxy 已启动
+sudo systemctl start ipv6-proxy
+
+# 启动 v2ray
+sudo systemctl start v2ray
+```
+
+### 客户端使用
+
+**VMess 方式**（推荐，支持多路复用）：
+- 服务端地址：你的服务器 IP
+- 端口：443
+- 协议：VMess
+- UUID：你生成的 UUID
+- TLS：开启
+
+**HTTP 方式**（简单直接）：
+```bash
+curl --proxy http://admin:your-password@your-server-ip:8080 https://api6.ipify.org
+```
+
+### 效果
+
+- **VMess 入站**：客户端流量通过 VMess 协议聚合，减少到 ipv6-proxy 的 TCP 连接数
+- **HTTP 入站**：兼容传统 HTTP 代理客户端，无需额外配置
+- **统一出口**：所有流量经 ipv6-proxy 随机 IPv6 出口，目标服务器看到不同 IP

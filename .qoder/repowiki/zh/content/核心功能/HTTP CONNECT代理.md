@@ -112,7 +112,7 @@ HTTP->>Target : "双向io.Copy(target, client)"
 
 ```mermaid
 flowchart TD
-Start(["进入handleHTTP"]) --> CheckMethod["检查HTTP方法是否为CONNECT"]
+Start["进入handleHTTP"] --> CheckMethod["检查HTTP方法是否为CONNECT"]
 CheckMethod --> |否| Return405["返回405 Method Not Allowed"]
 CheckMethod --> |是| ParseHost["解析目标地址<br/>优先r.Host，其次r.URL.Host"]
 ParseHost --> HasPort{"是否包含端口?"}
@@ -134,7 +134,7 @@ DialOK --> |否| Write502["写入502 Bad Gateway并返回"]
 DialOK --> |是| SetNoDelayRemote["设置远端TCP NoDelay"]
 SetNoDelayRemote --> Send200["写入200 Connection established"]
 Send200 --> Relay["双向io.Copy转发"]
-Relay --> End(["结束"])
+Relay --> End["结束"]
 ```
 
 图表来源
