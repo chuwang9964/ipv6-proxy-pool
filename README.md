@@ -10,24 +10,54 @@
 - **并发限流**：内置 semaphore，防止资源耗尽
 - **与 v2ray/xray 配合**：通过 smux 聚合缓解路由器 conntrack 压力
 
-## 快速开始
+## 一、确认网络环境
+
+查看服务器的 IPv6 地址，确认网口和 prefix：
 
 ```bash
-# 安装
-curl -sSL https://raw.githubusercontent.com/chuwang9964/ipv6-proxy-pool/main/scripts/install.sh | sudo bash
-
-# 运行
-sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:6b0:50::/112
-
-# 测试
-curl --socks5 127.0.0.1:53421 https://api6.ipify.org 
-curl --proxy 127.0.0.1:53420 https://api6.ipify.org
+root@192:~# ip addr
+2: enp1s0: <BROADCAST,MULTICAST,ALLMULTI,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether e4:54:e8:99:c6:47 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.1.250/24 brd 192.168.1.255 scope global enp1s0
+       valid_lft forever preferred_lft forever
+    inet6 240e:6b0:50::fd5/128 scope global noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 240e:6b0:50:0:e654:e8ff:fe99:c647/64 scope global mngtmpaddr noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 fe80::e654:e8ff:fe99:c647/64 scope link 
+       valid_lft forever preferred_lft forever
 ```
-# 手动部署
 
-1. 系统配置
+- **网口**：`enp1s0`
+- **本机 IPv6 地址**：`240e:6b0:50:0:e654:e8ff:fe99:c647/64`
+- **Prefix 选择**：
+  - 后期打算在同一路由下添加多台 IPv6 代理 → 选择 `240e:6b0:50:0::/112`
+  - 只需要一台 IPv6 代理 → 使用 `240e:6b0:50::/64`
+
+## 二、编译部署
+
 ```bash
-#  内核参数
+# 1. 安装 Go（如果还没有）
+wget https://go.dev/dl/go1.22.3.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.22.3.linux-amd64.tar.gz
+export PATH=$PATH:/usr/local/go/bin
+
+# 2. 编译
+sudo mkdir -p /opt/ipv6-proxy
+sudo tee /opt/ipv6-proxy/main.go <<'EOF'
+# 把上面的 Go 代码完整粘贴进来
+EOF
+
+cd /opt/ipv6-proxy
+sudo /usr/local/go/bin/go build -o ipv6-proxy main.go
+sudo chmod +x /opt/ipv6-proxy/ipv6-proxy
+```
+
+## 三、系统配置
+
+### 1. 内核参数
+
+```bash
 sudo tee /etc/sysctl.d/99-ipv6-proxy.conf <<'EOF'
 net.ipv6.ip_nonlocal_bind = 1
 net.ipv6.conf.all.forwarding = 1
@@ -38,37 +68,38 @@ net.ipv4.tcp_tw_reuse = 1
 net.ipv4.ip_local_port_range = 1024 65535
 net.ipv4.tcp_fin_timeout = 15
 EOF
-
-# 查看你的ipv6地址 
-yxproxy@yxproxy:~$ ip addr
-enp2s0: <BROADCAST,MULTICAST,ALLMULTI,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
-    link/ether e4:54:e8:99:c6:47 brd ff:ff:ff:ff:ff:ff
-    inet 192.168.1.250/24 brd 192.168.1.255 scope global enp1s0
-       valid_lft forever preferred_lft forever
-    inet6 240e:6b0:50::fd5/128 scope global noprefixroute 
-       valid_lft forever preferred_lft forever
-    inet6 240e:6b0:50:0:e654:e8ff:fe99:c647/64 scope global mngtmpaddr noprefixroute 
-       valid_lft forever preferred_lft forever
-    inet6 fe80::e654:e8ff:fe99:c647/64 scope link 
-       valid_lft forever preferred_lft forever
-
-# 添加本地路由，认领你的 /112 子网到本地（每台服务器认领不同的 /112，避免冲突）
-# 例如服务器A用 240e:6b0:50::/112，服务器B用 240e:6b0:50:2::/112
-sudo ip route add local 240e:6b0:50::/112 dev enp2s0
+sudo sysctl -p /etc/sysctl.d/99-ipv6-proxy.conf
 ```
 
-2. 安装ndppd 对应的网口enp2s0 对应的ipv6网段
+### 2. 本地路由
+
+关键：让内核认为整个前缀都是本地地址。
+
+```bash
+# 单台情况
+sudo ip route add local 240e:6b0:50::/64 dev enp1s0
+
+# 多台情况
+sudo ip route add local 240e:6b0:50:0:1::/112 dev enp1s0
+```
+
+> **多台服务器注意**：如果不规划服务器认领 IP 段，会出现多台服务器共同认领一段 IP，导致某台服务器生成的 IPv6 地址失效、路由器异常。可以规划第二台的 IP 段为 `240e:6b0:50:0:2::/112`，以此类推。
+
+### 3. ndppd
+
+static 模式，无条件代理整个前缀的 NDP。多台则换成 `240e:6b0:50:0:1::/112`。
+
 ```bash
 sudo apt install -y ndppd
 sudo tee /etc/ndppd.conf <<'EOF'
 route-ttl 30000
 
-proxy enp2s0 {
+proxy enp1s0 {
     router no
     timeout 500
     ttl 30000
 
-    rule 240e:6b0:50::/112 {
+    rule 240e:6b0:50::/64 {
         static
     }
 }
@@ -77,24 +108,79 @@ sudo systemctl enable ndppd
 sudo systemctl restart ndppd
 ```
 
-3. 编译运行
-```bash
-# 1. 安装 Go（如果还没有）
-wget https://go.dev/dl/go1.22.3.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.22.3.linux-amd64.tar.gz
-export PATH=$PATH:/usr/local/go/bin
+## 四、Systemd 服务（高并发版）
 
-# 2. 编译
-sudo mkdir -p /opt/ipv6-proxy
-cd /opt/ipv6-proxy
-sudo /usr/local/go/bin/go build -o ipv6-proxy main.go
-sudo chmod +x /opt/ipv6-proxy/ipv6-proxy
-sudo ./ipv6-proxy -http 0.0.0.0:53420 -socks 0.0.0.0:53421 -prefix 240e:6b0:50::/112 -c 10000
-```
-4. 测试
+多台情况下更改 `-prefix 240e:6b0:50:0:1::/112`。
+
 ```bash
-curl --socks5 127.0.0.1:53421 https://api6.ipify.org
-curl --proxy 127.0.0.1:53420 https://api6.ipify.org
+sudo tee /etc/systemd/system/ipv6-proxy.service <<'EOF'
+[Unit]
+Description=IPv6 Rotating Proxy (HTTP+SOCKS5)
+After=network-online.target ndppd.service
+Wants=network-online.target ndppd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ipv6-proxy
+
+# -c 10000: 并发上限 10000（HTTP 和 SOCKS5 共享）
+ExecStart=/opt/ipv6-proxy/ipv6-proxy \
+    -http 0.0.0.0:53420 \
+    -socks 0.0.0.0:53421 \
+    -prefix 240e:6b0:50::/64 \
+    -c 10000
+
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# === 资源限制：并发高的核心 ===
+LimitNOFILE=1048576
+LimitNPROC=65535
+OOMScoreAdjust=-800
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ipv6-proxy
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now ipv6-proxy
+sudo journalctl -u ipv6-proxy -f
+```
+
+## 五、验证与测试
+
+```bash
+# 1. 确认服务启动
+sudo systemctl status ipv6-proxy
+
+# 2. 测试 HTTP 代理（轮换 IPv6）
+for i in {1..5}; do
+  curl -s -x http://127.0.0.1:53420 https://api6.ipify.org
+  echo
+done
+
+# 3. 测试 SOCKS5 代理
+for i in {1..5}; do
+  curl -s --socks5 127.0.0.1:53421 https://api6.ipify.org
+  echo
+done
+
+# 4. 确认 IPv4-only 目标被拒绝
+curl -x http://127.0.0.1:53420 --connect-timeout 5 https://v4.ident.me
+# 期望：502 Bad Gateway
+
+curl --socks5 127.0.0.1:53421 --connect-timeout 5 https://v4.ident.me
+# 期望：连接失败（SOCKS5 返回 0x04 host unreachable）
+
+# 5. 看日志确认源 IP 在 240e:6b0:50::/112 范围内
+sudo journalctl -u ipv6-proxy -n 30 --no-pager
 ```
 
 ## 配合 v2ray 使用（推荐）
