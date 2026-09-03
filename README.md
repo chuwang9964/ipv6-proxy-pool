@@ -71,29 +71,38 @@ EOF
 sudo sysctl -p /etc/sysctl.d/99-ipv6-proxy.conf
 ```
 
-### 2. 绑定 IPv6 地址到接口
+### 2. 绑定 IPv6 地址 + 添加本地路由
 
-关键：让内核认为整个前缀都是本地地址。**必须用 `ip addr add`**，而不是 `ip route add local`。
+两步缺一不可：
 
-- `ip addr add` 将前缀注册到接口，内核自动创建 local 路由，**网卡 link 重置后仍然有效**
-- `ip route add local` 只是临时路由表项，**网卡 link 重置即丢失**（路由器重启就会导致代理失效）
+| 命令 | 作用 | 持久性 |
+|------|------|--------|
+| `ip addr add` | 将前缀注册到接口 | link 重置后仍保留 |
+| `ip route add local` | 让内核允许 bind /112 内任意随机 IP | link 重置后丢失 |
+
+- 只有 `ip addr add`：地址在接口上，但内核无法 bind /112 内的个别随机 IP
+- 只有 `ip route add local`：bind 正常，但 link 重置后路由丢失
+- **两者配合**：`ip addr add` 保证持久性，`ip route add local` 保证 bind 功能
 
 ```bash
 # 单台情况
 sudo ip addr add 240e:6b0:50::/64 dev enp1s0
+sudo ip route add local 240e:6b0:50::/64 dev enp1s0
 
 # 多台情况
 sudo ip addr add 240e:6b0:50:0:1::/112 dev enp1s0
+sudo ip route add local 240e:6b0:50:0:1::/112 dev enp1s0
 ```
 
 > **多台服务器注意**：每台服务器必须认领不同的 /112 子网，否则会出现地址争抢导致代理失效。例如：
-> - 服务器 A：`ip addr add 240e:6b0:50:0:1::/112 dev enp1s0`
-> - 服务器 B：`ip addr add 240e:6b0:50:0:2::/112 dev enp1s0`
-> - 服务器 C：`ip addr add 240e:6b0:50:0:3::/112 dev enp1s0`
+> - 服务器 A：`ip addr add 240e:6b0:50:0:1::/112 dev enp1s0` + `ip route add local ...`
+> - 服务器 B：`ip addr add 240e:6b0:50:0:2::/112 dev enp1s0` + `ip route add local ...`
+> - 服务器 C：`ip addr add 240e:6b0:50:0:3::/112 dev enp1s0` + `ip route add local ...`
 
 验证地址已绑定：
 ```bash
 ip addr show dev enp1s0 | grep "240e:6b0:50"
+ip -6 route show table local dev enp1s0 | grep "240e:6b0:50"
 ```
 
 ### 3. ndppd
@@ -123,7 +132,7 @@ sudo systemctl restart ndppd
 
 多台情况下更改 `-prefix`、`ExecStartPre` 中的地址和网口。
 
-> **核心**：`ExecStartPre` 在每次服务启动前自动执行 `ip addr add`，确保服务器重启或网卡重置后地址绑定自动恢复。
+> **核心**：`ExecStartPre` 在每次服务启动前自动执行 `ip addr add` + `ip route add local`，确保服务器重启或网卡重置后自动恢复。
 
 ```bash
 sudo tee /etc/systemd/system/ipv6-proxy.service <<'EOF'
@@ -137,9 +146,11 @@ Type=simple
 User=root
 WorkingDirectory=/opt/ipv6-proxy
 
-# 启动前绑定 IPv6 地址到接口（重启后自动恢复，|| true 防止重复添加时报错）
+# 启动前绑定 IPv6 前缀到接口 + 添加本地路由（两者缺一不可）
 # ★ 请根据实际环境修改地址和网口
-ExecStartPre=/bin/bash -c '/sbin/ip addr add 240e:6b0:50:0:2::/112 dev enp1s0 2>/dev/null || true'
+# ip addr add: 地址注册到接口，link 重置后仍保留
+# ip route add local: 让内核允许 bind /112 内任意随机地址
+ExecStartPre=/bin/bash -c '/sbin/ip addr add 240e:6b0:50:0:2::/112 dev enp2s0 2>/dev/null || true; /sbin/ip route add local 240e:6b0:50:0:2::/112 dev enp2s0 2>/dev/null || true'
 
 # -c 10000: 并发上限 10000（HTTP 和 SOCKS5 共享）
 ExecStart=/opt/ipv6-proxy/ipv6-proxy \

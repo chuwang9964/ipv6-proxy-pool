@@ -121,9 +121,10 @@ net.ipv4.tcp_fin_timeout = 15
 EOF
 sysctl -p /etc/sysctl.d/99-ipv6-proxy.conf
 
-# 绑定 IPv6 地址到接口（立即生效）
-log_info "绑定 IPv6 地址 $PREFIX 到 $IFACE..."
+# 绑定 IPv6 地址到接口 + 添加本地路由（两者缺一不可）
+log_info "绑定 IPv6 前缀 $PREFIX 到 $IFACE..."
 ip addr add "$PREFIX" dev "$IFACE" 2>/dev/null || log_warn "地址已存在，跳过"
+ip route add local "$PREFIX" dev "$IFACE" 2>/dev/null || log_warn "路由已存在，跳过"
 
 # 配置 ndppd
 log_info "配置 ndppd..."
@@ -156,8 +157,8 @@ Type=simple
 User=root
 WorkingDirectory=/opt/ipv6-proxy
 
-# 启动前绑定 IPv6 地址到接口（重启后自动恢复）
-ExecStartPre=/bin/bash -c '/sbin/ip addr add $PREFIX dev $IFACE 2>/dev/null || true'
+# 启动前绑定 IPv6 前缀到接口 + 添加本地路由（两者缺一不可）
+ExecStartPre=/bin/bash -c '/sbin/ip addr add $PREFIX dev $IFACE 2>/dev/null || true; /sbin/ip route add local $PREFIX dev $IFACE 2>/dev/null || true'
 
 ExecStart=/opt/ipv6-proxy/ipv6-proxy \\
     -http 0.0.0.0:$HTTP_PORT \\
