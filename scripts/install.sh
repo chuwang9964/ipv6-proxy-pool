@@ -33,6 +33,43 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# ========== 交互式配置 ==========
+echo ""
+echo "=== IPv6 Proxy Pool 配置 ==="
+echo ""
+
+# 自动检测网口（排除 lo）
+DEFAULT_IFACE=$(ip -o link show up | awk -F': ' '!/lo/{print $2}' | head -1)
+read -p "网口名称 [$DEFAULT_IFACE]: " IFACE
+IFACE=${IFACE:-$DEFAULT_IFACE}
+
+# 自动检测 IPv6 前缀（取第一个全局 /64 地址的前缀）
+DEFAULT_PREFIX=$(ip -6 -o addr show dev "$IFACE" scope global | awk '{print $4}' | grep -v '/128' | head -1)
+read -p "IPv6 前缀 (如 240e:6b0:50:0:1::/112) [$DEFAULT_PREFIX]: " PREFIX
+PREFIX=${PREFIX:-$DEFAULT_PREFIX}
+
+if [ -z "$PREFIX" ]; then
+    log_error "未指定 IPv6 前缀，退出"
+    exit 1
+fi
+
+# 监听端口
+read -p "HTTP 代理端口 [53420]: " HTTP_PORT
+HTTP_PORT=${HTTP_PORT:-53420}
+read -p "SOCKS5 代理端口 [53421]: " SOCKS_PORT
+SOCKS_PORT=${SOCKS_PORT:-53421}
+read -p "并发上限 [10000]: " CONN_LIMIT
+CONN_LIMIT=${CONN_LIMIT:-10000}
+
+echo ""
+log_info "配置确认："
+echo "  网口:     $IFACE"
+echo "  前缀:     $PREFIX"
+echo "  HTTP:     0.0.0.0:$HTTP_PORT"
+echo "  SOCKS5:   0.0.0.0:$SOCKS_PORT"
+echo "  并发上限: $CONN_LIMIT"
+echo ""
+
 # 安装依赖
 log_info "安装依赖..."
 apt-get update
@@ -84,18 +121,77 @@ net.ipv4.tcp_fin_timeout = 15
 EOF
 sysctl -p /etc/sysctl.d/99-ipv6-proxy.conf
 
-# 安装 systemd 服务
-log_info "安装 systemd 服务..."
-cp /tmp/ipv6-proxy-pool/systemd/ipv6-proxy.service "$SERVICE_FILE"
-systemctl daemon-reload
+# 绑定 IPv6 地址到接口（立即生效）
+log_info "绑定 IPv6 地址 $PREFIX 到 $IFACE..."
+ip addr add "$PREFIX" dev "$IFACE" 2>/dev/null || log_warn "地址已存在，跳过"
 
-# 提示
-log_info "安装完成！"
+# 配置 ndppd
+log_info "配置 ndppd..."
+cat > /etc/ndppd.conf <<EOF
+route-ttl 30000
+
+proxy $IFACE {
+    router no
+    timeout 500
+    ttl 30000
+
+    rule $PREFIX {
+        static
+    }
+}
+EOF
+systemctl enable ndppd
+systemctl restart ndppd
+
+# 生成 systemd 服务（自动填入用户配置）
+log_info "安装 systemd 服务..."
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=IPv6 Rotating Proxy (HTTP+SOCKS5)
+After=network-online.target ndppd.service
+Wants=network-online.target ndppd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ipv6-proxy
+
+# 启动前绑定 IPv6 地址到接口（重启后自动恢复）
+ExecStartPre=/bin/bash -c '/sbin/ip addr add $PREFIX dev $IFACE 2>/dev/null || true'
+
+ExecStart=/opt/ipv6-proxy/ipv6-proxy \\
+    -http 0.0.0.0:$HTTP_PORT \\
+    -socks 0.0.0.0:$SOCKS_PORT \\
+    -prefix $PREFIX \\
+    -c $CONN_LIMIT
+
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=3
+
+LimitNOFILE=1048576
+LimitNPROC=65535
+OOMScoreAdjust=-800
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ipv6-proxy
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable ipv6-proxy
+systemctl start ipv6-proxy
+
+# 完成
+log_info "安装完成！服务已启动"
 echo ""
-echo "下一步："
-echo "1. 编辑配置文件: nano $CONFIG_DIR/config.yaml"
-echo "2. 配置本地路由: ip route add local <your-prefix> dev <interface>"
-echo "3. 配置 ndppd: cp /tmp/ipv6-proxy-pool/systemd/ndppd.conf.example /etc/ndppd.conf"
-echo "4. 启动服务: systemctl enable --now ipv6-proxy"
-echo ""
+echo "查看状态: systemctl status ipv6-proxy"
 echo "查看日志: journalctl -u ipv6-proxy -f"
+echo ""
+echo "测试:"
+echo "  curl -s -x http://127.0.0.1:$HTTP_PORT https://api6.ipify.org"
+echo "  curl -s --socks5 127.0.0.1:$SOCKS_PORT https://api6.ipify.org"

@@ -71,19 +71,30 @@ EOF
 sudo sysctl -p /etc/sysctl.d/99-ipv6-proxy.conf
 ```
 
-### 2. 本地路由
+### 2. 绑定 IPv6 地址到接口
 
-关键：让内核认为整个前缀都是本地地址。
+关键：让内核认为整个前缀都是本地地址。**必须用 `ip addr add`**，而不是 `ip route add local`。
+
+- `ip addr add` 将前缀注册到接口，内核自动创建 local 路由，**网卡 link 重置后仍然有效**
+- `ip route add local` 只是临时路由表项，**网卡 link 重置即丢失**（路由器重启就会导致代理失效）
 
 ```bash
 # 单台情况
-sudo ip route add local 240e:6b0:50::/64 dev enp1s0
+sudo ip addr add 240e:6b0:50::/64 dev enp1s0
 
 # 多台情况
-sudo ip route add local 240e:6b0:50:0:1::/112 dev enp1s0
+sudo ip addr add 240e:6b0:50:0:1::/112 dev enp1s0
 ```
 
-> **多台服务器注意**：如果不规划服务器认领 IP 段，会出现多台服务器共同认领一段 IP，导致某台服务器生成的 IPv6 地址失效、路由器异常。可以规划第二台的 IP 段为 `240e:6b0:50:0:2::/112`，以此类推。
+> **多台服务器注意**：每台服务器必须认领不同的 /112 子网，否则会出现地址争抢导致代理失效。例如：
+> - 服务器 A：`ip addr add 240e:6b0:50:0:1::/112 dev enp1s0`
+> - 服务器 B：`ip addr add 240e:6b0:50:0:2::/112 dev enp1s0`
+> - 服务器 C：`ip addr add 240e:6b0:50:0:3::/112 dev enp1s0`
+
+验证地址已绑定：
+```bash
+ip addr show dev enp1s0 | grep "240e:6b0:50"
+```
 
 ### 3. ndppd
 
@@ -110,7 +121,9 @@ sudo systemctl restart ndppd
 
 ## 四、Systemd 服务（高并发版）
 
-多台情况下更改 `-prefix 240e:6b0:50:0:1::/112`。
+多台情况下更改 `-prefix`、`ExecStartPre` 中的地址和网口。
+
+> **核心**：`ExecStartPre` 在每次服务启动前自动执行 `ip addr add`，确保服务器重启或网卡重置后地址绑定自动恢复。
 
 ```bash
 sudo tee /etc/systemd/system/ipv6-proxy.service <<'EOF'
@@ -124,11 +137,15 @@ Type=simple
 User=root
 WorkingDirectory=/opt/ipv6-proxy
 
+# 启动前绑定 IPv6 地址到接口（重启后自动恢复，|| true 防止重复添加时报错）
+# ★ 请根据实际环境修改地址和网口
+ExecStartPre=/bin/bash -c '/sbin/ip addr add 240e:6b0:50:0:2::/112 dev enp1s0 2>/dev/null || true'
+
 # -c 10000: 并发上限 10000（HTTP 和 SOCKS5 共享）
 ExecStart=/opt/ipv6-proxy/ipv6-proxy \
     -http 0.0.0.0:53420 \
     -socks 0.0.0.0:53421 \
-    -prefix 240e:6b0:50::/64 \
+    -prefix 240e:6b0:50:0:2::/112 \
     -c 10000
 
 Restart=always
